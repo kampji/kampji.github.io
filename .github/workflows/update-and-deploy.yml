@@ -1,0 +1,59 @@
+# Refreshes the Projects and Writing sections, commits any changes,
+# and deploys the site to GitHub Pages.
+#
+# Runs: daily, on every push to main, and on demand (Actions tab → Run workflow).
+# Requires: Settings → Pages → Source set to "GitHub Actions".
+
+name: Update and deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 10 * * *"   # daily, ~6:17 AM Eastern
+  workflow_dispatch:
+
+permissions:
+  contents: write   # commit the refreshed page
+  pages: write      # deploy to Pages
+  id-token: write   # required by deploy-pages
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refresh projects and articles
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_USER: kampji
+          MEDIUM_HANDLE: ""   # e.g. "yourhandle" (no @). Leave empty to skip.
+        run: python3 scripts/update.py
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html sitemap.xml
+          git diff --cached --quiet || { git commit -m "Auto-update projects and articles"; git push; }
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
