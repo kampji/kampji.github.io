@@ -31,7 +31,7 @@ INDEX = ROOT / "index.html"
 SITEMAP = ROOT / "sitemap.xml"
 
 GH_USER = os.environ.get("GH_USER") or "kampji"
-MEDIUM_HANDLE = (os.environ.get("MEDIUM_HANDLE") or "j.kamperides").lstrip("@")
+MEDIUM_HANDLE = (os.environ.get("MEDIUM_HANDLE") or "jillkamperides").lstrip("@")
 RESEARCH_REPO = os.environ.get("RESEARCH_REPO") or f"{GH_USER}/My-Security-Research"
 RESEARCH_BRANCH = os.environ.get("RESEARCH_BRANCH") or "main"
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
