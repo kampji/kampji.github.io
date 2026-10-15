@@ -3,7 +3,7 @@
 
 - Writing: your latest Medium posts, read from your Medium RSS feed.
 - Open-Source Projects: every public, non-fork, non-archived repo you own,
-  sorted by stars (high to low), then name (A to Z).
+  sorted by stars (high to low), then most recently updated.
 - Security Research: the table in your My-Security-Research README,
   in the same order as the table.
 
@@ -37,8 +37,10 @@ RESEARCH_BRANCH = os.environ.get("RESEARCH_BRANCH") or "main"
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
 MAX_ARTICLES = int(os.environ.get("MAX_ARTICLES", "6"))
 
-# Repos that are about the site itself, not projects worth listing.
-SKIP_REPOS = {f"{GH_USER}.github.io".lower(), GH_USER.lower()}
+# Repos not worth listing as projects: the site itself, the profile README,
+# and the research repo (it has its own Security Research section).
+SKIP_REPOS = {f"{GH_USER}.github.io".lower(), GH_USER.lower(),
+              RESEARCH_REPO.split("/")[-1].lower()}
 
 INDENT = "      "
 
@@ -70,7 +72,11 @@ def get_repos():
              if not r.get("fork") and not r.get("archived")
              and not r.get("private")
              and r["name"].lower() not in SKIP_REPOS]
-    repos.sort(key=lambda r: (-r.get("stargazers_count", 0), r["name"].lower()))
+    # Stars (high to low), then most recently pushed, then name.
+    # Python's sort is stable, so sort by the least important key first.
+    repos.sort(key=lambda r: r["name"].lower())
+    repos.sort(key=lambda r: r.get("pushed_at") or "", reverse=True)
+    repos.sort(key=lambda r: r.get("stargazers_count", 0), reverse=True)
     return repos
 
 
@@ -98,6 +104,33 @@ def render_repos(repos):
     return out
 
 
+CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}encoded"
+DESC_MAX = 220
+
+
+def html_to_text(fragment):
+    text = re.sub(r"<[^>]+>", "", fragment)
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def article_description(content):
+    """Medium puts the article's subtitle in an <h4> at the top of the content.
+    Fall back to the first paragraph, trimmed, if there's no subtitle."""
+    if not content:
+        return ""
+    head = content.lstrip()[:600]
+    m = re.match(r"(?:<h3[^>]*>.*?</h3>\s*)?<h4[^>]*>(.*?)</h4>", head, re.S)
+    if m:
+        return html_to_text(m.group(1))
+    m = re.search(r"<p[^>]*>(.*?)</p>", content, re.S)
+    if not m:
+        return ""
+    text = html_to_text(m.group(1))
+    if len(text) > DESC_MAX:
+        text = text[:DESC_MAX].rsplit(" ", 1)[0].rstrip(",;:.") + "…"
+    return text
+
+
 def get_articles():
     raw = fetch(f"https://medium.com/feed/@{MEDIUM_HANDLE}",
                 "application/rss+xml, application/xml")
@@ -108,11 +141,13 @@ def get_articles():
         link = (item.findtext("link") or "").split("?")[0]  # drop tracking params
         pub = item.findtext("pubDate") or ""
         try:
-            date = dt.datetime.strptime(pub[:16], "%a, %d %b %Y").strftime("%b %d, %Y")
+            d = dt.datetime.strptime(pub[:16], "%a, %d %b %Y")
+            date = f"{d:%b} {d.day}, {d.year}"
         except ValueError:
             date = ""
+        desc = article_description(item.findtext(CONTENT_NS) or "")
         if title and link:
-            items.append((title, link, date))
+            items.append((title, link, date, desc))
     return items
 
 
@@ -120,11 +155,13 @@ def render_articles(items):
     if not items:
         return [f'{INDENT}<p class="lede">Articles coming soon.</p>']
     out = []
-    for title, link, date in items:
+    for title, link, date, desc in items:
         out.append(f'{INDENT}<div class="card">')
         out.append(f'{INDENT}  <h3><a href="{html.escape(link)}">{html.escape(title)}</a></h3>')
-        if date:
-            out.append(f'{INDENT}  <p class="meta">{date} · Medium</p>')
+        if desc:
+            out.append(f"{INDENT}  <p>{html.escape(desc)}</p>")
+        meta = " · ".join(x for x in ("Medium", date) if x)
+        out.append(f'{INDENT}  <p class="meta">{meta}</p>')
         out.append(f"{INDENT}</div>")
     return out
 
