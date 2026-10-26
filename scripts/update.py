@@ -50,6 +50,27 @@ SITES = {
 }
 SITE_RELEASES_PAGE = "releases.html"
 
+# Type badges, from each repo's GitHub topics. Checked top to bottom; the first
+# badge with a matching topic wins, so each tile gets at most one. A repo with
+# none of these topics gets no badge. Edit freely: badge label -> topics.
+TOPIC_BADGES = [
+    ("Security", {"security", "cybersecurity", "cybersecurity-tools", "infosec",
+                  "pentesting", "penetration-testing", "pentest", "red-team",
+                  "vulnerability-scanner", "web-app-security", "offensive-security"}),
+    ("Game", {"game", "game-development", "gamedev", "idle-game"}),
+    ("RF & Satellites", {"satellite", "satellites", "satellite-tracking", "sdr",
+                         "rtl-sdr", "ham-radio", "amateur-radio", "rf", "radio"}),
+    ("Tool", {"tool", "tools", "cli", "utility", "automation", "pdf"}),
+]
+
+
+def type_badge(r):
+    topics = {t.lower() for t in r.get("topics") or []}
+    for label, wanted in TOPIC_BADGES:
+        if topics & wanted:
+            return label
+    return ""
+
 # Repos not worth listing as projects: the site itself, the profile README,
 # and the research repo (it has its own Security Research section).
 SKIP_REPOS = {f"{GH_USER}.github.io".lower(), GH_USER.lower(),
@@ -194,12 +215,13 @@ def render_repos(repos):
         if contrib:
             label = f"{contrib} merged PR" + ("s" if contrib != 1 else "")
             meta.append(f'<a href="{html.escape(r["_pr_url"])}">{label}</a>')
-        if contrib:
-            badge = ' <span class="badge">Contributor</span>'
-        elif r.get("_version", "").startswith("0."):
-            badge = ' <span class="badge">In development</span>'
-        else:
-            badge = ""
+        badge = ""
+        kind = type_badge(r)
+        if kind:
+            badge += f' <span class="badge">{html.escape(kind)}</span>'
+        if contrib:  # your role, not the project type: filled style
+            badge += ' <span class="badge solid">Contributor</span>'
+
         out.append(f'{INDENT}<div class="card">')
         out.append(f'{INDENT}  <h3><a href="{url}">{name}</a>{badge}</h3>')
         if desc:
