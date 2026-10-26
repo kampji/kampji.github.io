@@ -3,7 +3,8 @@
 
 - Writing: your latest Medium posts, read from your Medium RSS feed.
 - Open-Source Projects: every public, non-fork, non-archived repo you own,
-  sorted by stars (high to low), then most recently updated.
+  sorted by stars (high to low), then most recently updated, followed by
+  other people's repos where you have merged pull requests (Contributor).
 - Security Research: the table in your My-Security-Research README,
   in the same order as the table.
 
@@ -22,6 +23,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -36,6 +38,9 @@ RESEARCH_REPO = os.environ.get("RESEARCH_REPO") or f"{GH_USER}/My-Security-Resea
 RESEARCH_BRANCH = os.environ.get("RESEARCH_BRANCH") or "main"
 TOKEN = os.environ.get("GITHUB_TOKEN", "")
 MAX_ARTICLES = int(os.environ.get("MAX_ARTICLES", "6"))
+
+# Other people's repos to leave out of the contributions list, as "owner/name".
+SKIP_CONTRIB = set()
 
 # Repos not worth listing as projects: the site itself, the profile README,
 # and the research repo (it has its own Security Research section).
@@ -72,6 +77,38 @@ def get_repos():
              if not r.get("fork") and not r.get("archived")
              and not r.get("private")
              and r["name"].lower() not in SKIP_REPOS]
+    return sort_repos(repos)
+
+
+def get_contributions():
+    """Other people's repos where you have merged pull requests.
+
+    Found automatically with GitHub search, so a new merged PR shows up on its
+    own. Each repo gets a "Contributor" badge and a link to your PRs there.
+    """
+    q = urllib.parse.quote(f"type:pr author:{GH_USER} is:merged -user:{GH_USER}")
+    res = json.loads(fetch(f"https://api.github.com/search/issues?q={q}&per_page=100",
+                           "application/vnd.github+json"))
+    counts = {}
+    for item in res.get("items", []):
+        full = item["repository_url"].split("/repos/", 1)[1]
+        counts[full] = counts.get(full, 0) + 1
+    repos = []
+    for full, n in counts.items():
+        if full.lower() in SKIP_CONTRIB:
+            continue
+        r = json.loads(fetch(f"https://api.github.com/repos/{full}",
+                             "application/vnd.github+json"))
+        if r.get("private"):
+            continue
+        r["_contrib"] = n
+        r["_pr_url"] = (f"https://github.com/{full}/pulls?q="
+                        + urllib.parse.quote(f"is:pr author:{GH_USER} is:merged"))
+        repos.append(r)
+    return sort_repos(repos)
+
+
+def sort_repos(repos):
     # Stars (high to low), then most recently pushed, then name.
     # Python's sort is stable, so sort by the least important key first.
     repos.sort(key=lambda r: r["name"].lower())
@@ -85,7 +122,9 @@ def render_repos(repos):
         return [f'{INDENT}<p class="lede">Projects coming soon.</p>']
     out = []
     for r in repos:
-        name = html.escape(r["name"])
+        contrib = r.get("_contrib")
+        # Show owner/name for other people's repos so it's clear whose project it is.
+        name = html.escape(r["full_name"] if contrib else r["name"])
         url = html.escape(r["html_url"])
         desc = (r.get("description") or "").strip()
         meta = []
@@ -94,8 +133,12 @@ def render_repos(repos):
         stars = r.get("stargazers_count", 0)
         if stars:
             meta.append(f"★ {stars}")
+        if contrib:
+            label = f"{contrib} merged PR" + ("s" if contrib != 1 else "")
+            meta.append(f'<a href="{html.escape(r["_pr_url"])}">{label}</a>')
+        badge = ' <span class="badge">Contributor</span>' if contrib else ""
         out.append(f'{INDENT}<div class="card">')
-        out.append(f'{INDENT}  <h3><a href="{url}">{name}</a></h3>')
+        out.append(f'{INDENT}  <h3><a href="{url}">{name}</a>{badge}</h3>')
         if desc:
             out.append(f"{INDENT}  <p>{html.escape(desc)}</p>")
         if meta:
@@ -260,8 +303,14 @@ def main():
 
     try:
         repos = get_repos()
-        text = replace_block(text, "PROJECTS", render_repos(repos))
-        print(f"Projects: {len(repos)} repos")
+        try:
+            contribs = get_contributions()
+        except Exception as e:  # still show your own repos if search fails
+            contribs = []
+            print(f"Contributions: skipped ({e})")
+        # Your own projects first, then repos you've contributed to.
+        text = replace_block(text, "PROJECTS", render_repos(repos + contribs))
+        print(f"Projects: {len(repos)} repos, {len(contribs)} contributions")
     except Exception as e:  # leave the section untouched on failure
         print(f"Projects: skipped ({e})")
 
