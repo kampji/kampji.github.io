@@ -42,6 +42,14 @@ MAX_ARTICLES = int(os.environ.get("MAX_ARTICLES", "6"))
 # Other people's repos to leave out of the contributions list, as "owner/name".
 SKIP_CONTRIB = set()
 
+# Your repos that publish a website (GitHub Pages). Their tile links to the
+# live site and shows the latest version and release from the site's own pages,
+# instead of linking to the repo. Repo name -> site URL.
+SITES = {
+    "finside": f"https://{GH_USER}.github.io/finside/",
+}
+SITE_RELEASES_PAGE = "releases.html"
+
 # Repos not worth listing as projects: the site itself, the profile README,
 # and the research repo (it has its own Security Research section).
 SKIP_REPOS = {f"{GH_USER}.github.io".lower(), GH_USER.lower(),
@@ -77,6 +85,14 @@ def get_repos():
              if not r.get("fork") and not r.get("archived")
              and not r.get("private")
              and r["name"].lower() not in SKIP_REPOS]
+    for r in repos:
+        site = SITES.get(r["name"].lower())
+        if site:
+            r["_site"] = site
+            try:
+                enrich_site(r)
+            except Exception as e:  # still show a basic tile linking the site
+                print(f"Site {r['name']}: details skipped ({e})")
     return sort_repos(repos)
 
 
@@ -117,18 +133,60 @@ def sort_repos(repos):
     return repos
 
 
+def raw_file(r, path):
+    branch = r.get("default_branch") or "main"
+    url = f"https://raw.githubusercontent.com/{r['full_name']}/{branch}/{path}"
+    return fetch(url, "text/html").decode("utf-8", "replace")
+
+
+def enrich_site(r):
+    """Read the site's title, plus the newest release from its release notes.
+
+    Release notes are expected to look like:
+        <h2>Release name</h2>
+        <p class="sub">Version 0.3.0 · October 25, 2026</p>
+    """
+    page = raw_file(r, "index.html")
+    m = re.search(r"<title[^>]*>(.*?)</title>", page, re.S | re.I)
+    if m:
+        r["_title"] = html_to_text(m.group(1))
+    notes = raw_file(r, SITE_RELEASES_PAGE)
+    m = re.search(
+        r"<h2[^>]*>((?:(?!</h2>).)*)</h2>\s*<p[^>]*>\s*Version\s+([\w.\-]+)\s*"
+        r"(?:·|&middot;|&#183;|-|\|)\s*([^<]+?)\s*</p>", notes, re.S | re.I)
+    if m:
+        r["_release"] = html_to_text(m.group(1))
+        r["_version"] = m.group(2)
+        try:
+            d = dt.datetime.strptime(html_to_text(m.group(3)), "%B %d, %Y")
+            r["_release_date"] = f"{d:%b} {d.day}, {d.year}"
+        except ValueError:
+            r["_release_date"] = html_to_text(m.group(3))
+        r["_releases_url"] = r["_site"].rstrip("/") + "/" + SITE_RELEASES_PAGE
+
+
 def render_repos(repos):
     if not repos:
         return [f'{INDENT}<p class="lede">Projects coming soon.</p>']
     out = []
     for r in repos:
         contrib = r.get("_contrib")
+        site = r.get("_site")
         # Show owner/name for other people's repos so it's clear whose project it is.
-        name = html.escape(r["full_name"] if contrib else r["name"])
-        url = html.escape(r["html_url"])
+        if site:
+            name = html.escape(r.get("_title") or r["name"])
+        else:
+            name = html.escape(r["full_name"] if contrib else r["name"])
+        url = html.escape(site or r["html_url"])
         desc = (r.get("description") or "").strip()
         meta = []
-        if r.get("language"):
+        if r.get("_version"):
+            v = f"v{html.escape(r['_version'])}"
+            if r.get("_release_date"):
+                v += f" · {html.escape(r['_release_date'])}"
+            meta.append(v)
+            meta.append(f'<a href="{html.escape(r["_releases_url"])}">Release notes</a>')
+        elif r.get("language") and not site:
             meta.append(html.escape(r["language"]))
         stars = r.get("stargazers_count", 0)
         if stars:
@@ -136,7 +194,12 @@ def render_repos(repos):
         if contrib:
             label = f"{contrib} merged PR" + ("s" if contrib != 1 else "")
             meta.append(f'<a href="{html.escape(r["_pr_url"])}">{label}</a>')
-        badge = ' <span class="badge">Contributor</span>' if contrib else ""
+        if contrib:
+            badge = ' <span class="badge">Contributor</span>'
+        elif r.get("_version", "").startswith("0."):
+            badge = ' <span class="badge">In development</span>'
+        else:
+            badge = ""
         out.append(f'{INDENT}<div class="card">')
         out.append(f'{INDENT}  <h3><a href="{url}">{name}</a>{badge}</h3>')
         if desc:

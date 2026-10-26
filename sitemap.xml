@@ -4,6 +4,12 @@
     <loc>https://kampji.github.io/</loc>
     <lastmod>2026-10-24</lastmod>
   </url>
+  <url>
+    <loc>https://kampji.github.io/finside/</loc>
+  </url>
+  <url>
+    <loc>https://kampji.github.io/finside/releases.html</loc>
+  </url>
   <!-- Add a <url> block for each page you add later, e.g.:
   <url>
     <loc>https://kampji.github.io/blog/my-first-post/</loc>
