@@ -2,3 +2,4 @@ User-agent: *
 Allow: /
 
 Sitemap: https://kampji.github.io/sitemap.xml
+Sitemap: https://kampji.github.io/finside/sitemap.xml
